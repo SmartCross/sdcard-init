@@ -1,0 +1,66 @@
+#!/bin/bash
+set -e
+export BOX64_LOG=0
+export BOX64_DYNAREC_LOG=0
+export BOX64_NOBANNER=1
+cd "$(dirname "${BASH_SOURCE[0]}")"
+dl_dir="dl"
+out_dir="out"
+res_dir=$(realpath res)
+
+mkdir -p $dl_dir
+rm -rf $out_dir
+mkdir $out_dir
+
+if [ $(uname -m) == "aarch64" ]; then
+  echo "==================================================="
+  echo "If you see exec format error, please install box64."
+  echo "==================================================="
+fi
+
+echo ""
+
+download_file() {
+  url="$1"
+  file_name=$(basename "$url")
+
+  # Check if the file exists in dl directory
+  if [ -e "${dl_dir}/${file_name}" ]; then
+    echo "File ${file_name} already exists in '${dl_dir}' directory, skip download"
+    return
+  fi
+
+  temp_dir=$(mktemp -d)
+
+  # Download the file to the temp directory using curl
+  echo "Downloading file '${file_name}'..."
+  if curl -L -o "${temp_dir}/${file_name}" "$url"; then
+    echo "Download successful, moving the file to '${dl_dir}' directory."
+    mv "${temp_dir}/${file_name}" "${dl_dir}/${file_name}"
+  else
+    echo "Download failed. Please try again."
+  fi
+
+  # Clean up the temp directory
+  rm -rf "$temp_dir"
+}
+
+download_file https://github.com/rockchip-linux/rkbin/raw/d6ccfe401ca84a98ca3b85c12b9554a1a43a166c/tools/mkimage
+download_file https://github.com/rockchip-linux/rkbin/raw/d6ccfe401ca84a98ca3b85c12b9554a1a43a166c/tools/trust_merger
+download_file https://github.com/rockchip-linux/rkbin/raw/d6ccfe401ca84a98ca3b85c12b9554a1a43a166c/tools/loaderimage
+chmod +x dl/mkimage dl/trust_merger dl/loaderimage
+
+download_file https://github.com/rockchip-linux/rkbin/raw/d6ccfe401ca84a98ca3b85c12b9554a1a43a166c/bin/rk33/rk3399_ddr_800MHz_v1.30.bin
+download_file https://github.com/rockchip-linux/rkbin/raw/d6ccfe401ca84a98ca3b85c12b9554a1a43a166c/bin/rk33/rk3399_bl31_v1.36.elf
+download_file https://github.com/rockchip-linux/rkbin/raw/d6ccfe401ca84a98ca3b85c12b9554a1a43a166c/bin/rk33/rk3399_miniloader_v1.26.bin
+
+echo Generating idbloader.img
+dl/mkimage -n rk3399 -T rksd -d dl/rk3399_ddr_800MHz_v1.30.bin $out_dir/idbloader.img
+cat dl/rk3399_miniloader_v1.26.bin >> $out_dir/idbloader.img
+
+echo Generating trust.img
+(cd $out_dir; ../dl/trust_merger --pack $res_dir/RK3399TRUST.ini)
+
+echo Generating uboot.img
+dl/loaderimage --pack --uboot $res_dir/u-boot-dtb.bin $out_dir/uboot.img 0x00200000
+

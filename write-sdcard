@@ -1,0 +1,65 @@
+#!/bin/bash
+set -e
+out_dir="out"
+res_dir=$(realpath res)
+
+if [[ $EUID -ne 0 ]]; then
+   echo "This script must be run as root"
+   exit 1
+fi
+
+device="/dev/disk/by-id/usb-Prolific_Technology_Inc._SD_Card_Reader_ABCDEF0123456789AB-0:0"
+
+for file in $out_dir/idbloader.img $out_dir/trust.img $out_dir/uboot.img; do
+  if [ ! -e "$file" ]; then
+    echo "Error: $file does not exist, please run prepare-files script first"
+    exit 1
+  fi
+done
+
+if [ ! -e "$file" ]; then
+  echo "Error: sdcard not found"
+  exit 1
+fi
+
+device=$(realpath $device)
+size=$(lsblk -nd --output SIZE -b "$device" | awk '{$1=int($1/(1024*1024*1024)); print $1}') # Calculate size in GB
+echo "About to format $device (disk size $size GB)"
+read -p "Continue (y/n)? " CONT
+if [ "x$CONT" != "xy" ]; then
+  exit 0
+fi
+
+echo Creating partition table on device...
+sgdisk -o -n 1:100M:1636M -c 1:"rootfs-a" -t 1:8300 -n 2:1637M:3173M -c 2:"rootfs-b" -t 2:8300 $device
+
+echo Writing idbloader...
+dd if=$out_dir/idbloader.img of=$device seek=64
+
+echo Writing uboot...
+dd if=$out_dir/uboot.img of=$device seek=16384
+
+echo Writing trust...
+dd if=$out_dir/trust.img of=$device seek=24576
+
+get_partition_path() {
+  disk_path="$1"
+  index="$2"
+  if [[ $disk_path =~ [0-9]$ ]]; then
+    partition_path="${disk_path}p${index}"
+  else
+    partition_path="${disk_path}${index}"
+  fi
+  echo "$partition_path"
+}
+
+echo Clearing uboot env...
+dd if=/dev/zero of=$device seek=8064 count=64
+
+part_dev=$(get_partition_path $device 1)
+echo Writing rootfs image to $part_dev...
+curl https://pgw-ray.t123yh.xyz:3/images/rootfs.ext2.gz | gzip -d | dd of=$part_dev bs=128k
+
+
+echo Ejecting card...
+eject $device
