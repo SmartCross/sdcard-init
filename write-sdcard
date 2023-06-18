@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 bin_dir="bin"
-res_dir=$(realpath res)
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root"
